@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+.venv/
+venv/
+pip-wheel-metadata/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local DB/state/artifacts
+state.db
+storage/
+logs/
+*.log
+
+# Docker local junk
+*.pid

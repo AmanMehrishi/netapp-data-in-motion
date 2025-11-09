@@ -1,0 +1,162 @@
+services:
+  redpanda:
+    image: redpandadata/redpanda:v23.3.16
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --kafka-addr=0.0.0.0:9092
+      - --advertise-kafka-addr=redpanda:9092
+    ports:
+      - "9092:9092"
+
+  minio1:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports: ["9000:9000","9001:9001"]
+    volumes: [minio1:/data]
+
+  minio2:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports: ["9100:9000","9101:9001"]
+    volumes: [minio2:/data]
+
+  minio3:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports: ["9200:9000","9201:9001"]
+    volumes: [minio3:/data]
+
+  api:
+    build: .
+    container_name: data-in-motion-api
+    environment:
+      - PYTHONPATH=/app
+      - KAFKA_BOOTSTRAP=redpanda:9092
+      - DB_URL=sqlite:////app/data/state.db
+      - SLA_LATENCY_MS=80
+      - REPLICATION_FACTOR=2
+      - ENCRYPTION_ENABLED=false
+      - FAST_DEMO=true
+      - ACCESS_TOPIC=file_access
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - S3_ENDPOINTS=[{"name":"aws","url":"http://minio1:9000","access_key":"minio","secret_key":"minio123","bucket":"aws-bucket","latency_ms":50,"cost_per_gb":0.023,"encrypted":true},{"name":"azure","url":"http://minio2:9000","access_key":"minio","secret_key":"minio123","bucket":"azure-bucket","latency_ms":70,"cost_per_gb":0.020,"encrypted":true},{"name":"gcp","url":"http://minio3:9000","access_key":"minio","secret_key":"minio123","bucket":"gcp-bucket","latency_ms":60,"cost_per_gb":0.026,"encrypted":false}]
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redpanda
+      - minio1
+      - minio2
+      - minio3
+    volumes:
+      - state:/app/data
+      - ./app/models:/app/models
+      - ./app:/app/app
+    healthcheck:
+      test: ["CMD","curl","-sf","http://localhost:8000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  dashboard:
+    build: .
+    container_name: data-in-motion-dashboard
+    command:
+      [
+        "streamlit",
+        "run",
+        "app/dashboard/streamlit_app.py",
+        "--server.port=8050",
+        "--server.address=0.0.0.0",
+        "--server.headless=true"
+      ]
+    environment:
+      - PYTHONPATH=/app
+      - API_URL=http://api:8000
+    ports:
+      - "8050:8050"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  consumer:
+    build: .
+    container_name: data-in-motion-consumer
+    command: ["python","-m","app.services.stream.consumer"]
+    environment:
+      - PYTHONPATH=/app
+      - KAFKA_BOOTSTRAP=redpanda:9092
+      - DB_URL=sqlite:////app/data/state.db
+      - ACCESS_TOPIC=file_access
+      - CONSUMER_GROUP=dim-stream
+    depends_on:
+      api:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+    volumes:
+      - state:/app/data
+      - ./app/models:/app/models
+    
+  optimizer_cron:
+    build: .
+    container_name: data-in-motion-optimizer-cron
+    command: ["python", "-m", "app.services.optimizer.cron"]
+    environment:
+      - PYTHONPATH=/app
+      - DB_URL=sqlite:////app/data/state.db
+      - OPTIMIZER_INTERVAL_S=10
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - state:/app/data
+      - ./app/models:/app/models
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: data-in-motion-prometheus
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=12h"]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      api:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: data-in-motion-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      prometheus:
+        condition: service_started
+
+volumes:
+  minio1:
+  minio2:
+  minio3:
+  state:
+  grafana-data:
