@@ -29,7 +29,7 @@ Environment is configured in `docker-compose.yml` (e.g., `SLA_LATENCY_MS`, `REPL
 Seed metadata and buckets:
 
 ```bash
-docker compose exec app python -m app.services.common.bootstrap
+docker compose exec api python -m app.services.common.bootstrap
 ```
 
 ## 3) Generate Traffic (choose one)
@@ -37,13 +37,13 @@ docker compose exec app python -m app.services.common.bootstrap
 - Continuous random producer (open loop):
 
 ```bash
-docker compose exec app python -m app.services.stream.producer
+docker compose exec api python -m app.services.stream.producer
 ```
 
 - Finite, seeded simulator (reproducible datasets):
 
 ```bash
-docker compose exec app python -m app.services.stream.simulate --events 1000 --rate 5 --skew 0.7 --seed 42
+docker compose exec api python -m app.services.stream.simulate --events 1000 --rate 5 --skew 0.7 --seed 42
 ```
 
 You can also use the Dashboard "Burst Selected (100)" button to increment counters for the selected file via the API.
@@ -51,7 +51,7 @@ You can also use the Dashboard "Burst Selected (100)" button to increment counte
 Optional: start the decayer to cool access counters over time:
 
 ```bash
-docker compose exec -d app python -m app.services.stream.decayer
+docker compose exec -d api python -m app.services.stream.decayer
 ```
 
 ## 4) Create a Dataset Snapshot and Train Models
@@ -59,7 +59,7 @@ docker compose exec -d app python -m app.services.stream.decayer
 Create a snapshot parquet with labels:
 
 ```bash
-docker compose exec app bash -lc '
+docker compose exec api bash -lc '
   mkdir -p /app/data /app/models /app/reports && \
   python -m app.ml.prepare_dataset --out /app/data/snapshot.parquet --label-mode fixed
 '
@@ -68,7 +68,7 @@ docker compose exec app bash -lc '
 Train the tier classifier and the hot-soon forecaster:
 
 ```bash
-docker compose exec app bash -lc '
+docker compose exec api bash -lc '
   python -m app.ml.train_tiers --data /app/data/snapshot.parquet --out /app/models/tier.bin --metrics /app/reports/tier_metrics.json && \
   python -m app.ml.train_forecast --data /app/data/snapshot.parquet --out /app/models/forecast.bin --metrics /app/reports/forecast_metrics.json
 '
@@ -154,7 +154,7 @@ Via `docker-compose.yml` environment:
 If you modify `app/requirements.txt`, rebuild the app image:
 
 ```bash
-docker compose build app && docker compose up -d
+docker compose build api dashboard consumer optimizer_cron && docker compose up -d
 ```
 
 ## Troubleshooting
